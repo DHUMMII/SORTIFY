@@ -7,7 +7,7 @@ import numpy as np
 import random
 import os
 
-# ---- DATABASE SETUP ------- #
+# ---- DATABASE SETUP ---- 
 conn = sqlite3.connect("sortify.db")
 c = conn.cursor()
 
@@ -50,20 +50,10 @@ CREATE TABLE IF NOT EXISTS eco_points (
 )
 """)
 
-#save changes
 conn.commit()
 
 # Classification logic 
-
 def classify_with_opencv(image_path, description=""):
-    """
-    Takes in:
-        image_path: Path to the uploaded image
-        description: text description from user (optional)
-    
-    Returns:
-        String: "Compostable", "Recyclable", "Reusable", "Trash", or "Unclear"
-    """
     try:
         img = cv2.imread(image_path)
         if img is None:
@@ -71,8 +61,8 @@ def classify_with_opencv(image_path, description=""):
 
         img = cv2.resize(img, (300, 300))
         
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)  # Better for color detection
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  # For edge/texture analysis
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)  #
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  
 
         # COLOR BASED CLASSIFICATION 
         
@@ -146,12 +136,11 @@ def classify_with_opencv(image_path, description=""):
             ]
         }
 
-        # Check description for keywords and override visual classification if found
         desc = description.lower()
         for category, word_list in keywords.items():
             for word in word_list:
                 if word in desc:
-                    category = category  # Override with keyword-based classification
+                    category = category  
                     return category
 
     except Exception as e:
@@ -173,7 +162,6 @@ class SortifyApp:
         self.current_user = None  # Tracks logged-in user
         self.image_path = None    # Stores path to selected image
 
-        # Start with login screen
         self.login_page()
         self.root.mainloop()
 
@@ -182,24 +170,19 @@ class SortifyApp:
         for widget in self.root.winfo_children():
             widget.destroy()
 
-    # Gamification methods
     def get_user_points(self, username):
-        """Get current eco points for a user"""
         c.execute("SELECT points FROM eco_points WHERE username=?", (username,))
         result = c.fetchone()
         return result[0] if result else 0
 
     def add_points(self, username, points):
-        """Add eco points to a user's account"""
         c.execute("SELECT points FROM eco_points WHERE username=?", (username,))
         result = c.fetchone()
         
         if result:
-            # User exists, update points
             new_points = result[0] + points
             c.execute("UPDATE eco_points SET points=? WHERE username=?", (new_points, username))
         else:
-            # New user, create entry
             c.execute("INSERT INTO eco_points (username, points) VALUES (?, ?)", (username, points))
         
         conn.commit()
@@ -211,7 +194,7 @@ class SortifyApp:
             current_points = self.get_user_points(self.current_user)
             self.points_label.configure(text=f"🌟 Eco Points: {current_points}")
 
-    # ---- AUTHENTICATION PAGES --- 
+    # ---- AUTHENTICATION PAGES -- 
 
     def login_page(self):
         self.clear_window()
@@ -262,7 +245,7 @@ class SortifyApp:
     def main_window(self):
         
         self.clear_window()
-        self.root.geometry("950x700")  # Expand window for main interface
+        self.root.geometry("950x700")  
 
         #navbar at the top
         navbar = CTkFrame(self.root, height=80)
@@ -318,7 +301,7 @@ class SortifyApp:
         
         CTkLabel(feedback_frame, text="Feedback on Prediction", font=("Arial",13,"bold")).pack(pady=5)
         
-        self.feedback_var = StringVar(value="Correct")  # Default selection
+        self.feedback_var = StringVar(value="Correct")  #by default "correct" is checked
         radios = CTkFrame(feedback_frame, fg_color="transparent")
         radios.pack(pady=5)
 
@@ -338,12 +321,10 @@ class SortifyApp:
         self.points_label = CTkLabel(points_frame, text="🌟 Eco Points: 0", font=("Arial",16,"bold"), text_color="white")
         self.points_label.pack(pady=10)
         
-        # Update points display on window load
         self.update_points_display()
 
     # ADMIN DASHBOARD
     def admin_window(self):
-        #this dashboard diplays all users and their feedback data
         self.clear_window()
         self.root.geometry("800x600")
 
@@ -363,25 +344,22 @@ class SortifyApp:
 
         for u in users:
             username = u[0]
-            # Lambda capture technique to bind username to button command
+            # Lambda fucntion to bind username to button command
             btn = CTkButton(frame, text=username, width=200, corner_radius=20,
                             command=lambda user=username: self.view_user_details(user))
             btn.pack(pady=5)
 
     def view_user_details(self, username):
-        #admin can view correct and incorrect feedbacks of the user
         details = CTkToplevel(self.root)
         details.title(f"Details - {username}")
         details.geometry("600x500")
 
         c.execute("SELECT type, COUNT(*) FROM feedback WHERE username=? GROUP BY type", (username,))
-        feedback_counts = dict(c.fetchall())  # Convert to dictionary for easy lookup
+        feedback_counts = dict(c.fetchall())  
         
-        # Extract counts with defaults for missing data
         correct_count = feedback_counts.get("Correct", 0)
         incorrect_count = feedback_counts.get("Incorrect", 0)
 
-        # Get all feedback messages
         c.execute("SELECT type, message FROM feedback WHERE username=?", (username,))
         messages = c.fetchall()
 
@@ -398,7 +376,6 @@ class SortifyApp:
     # -- FUNCTIONALITY METHODS -- 
     
     def choose_file(self):
-        # Open file dialog with image format filters
         self.image_path = filedialog.askopenfilename(
             title="Choose Image",
             filetypes=[("PNG files","*.png"),("JPG files","*.jpg"),("JPEG files","*.jpeg"),("All Files","*.*")]
@@ -411,43 +388,34 @@ class SortifyApp:
                 self.preview_label.configure(image=ctk_img, text="")
                 self.preview_label.image = ctk_img  # Keep reference
             except Exception as e:
-                # Handles corrupted or unsupported image files
                 self.preview_label.configure(text="Error loading image")
                 print("Error:", e)
 
     def classify_item(self):
-        # Ensure image is selected
         if not self.image_path:
             messagebox.showwarning("No Image", "Please upload an image first!")
             return
 
-        # Get user description text
         description = self.desc_box.get("1.0","end").strip()
         
-        # Call the core classification method
         category = classify_with_opencv(self.image_path, description)
 
-        # Update UI with results
         self.result_label.configure(text=f"Category: {category}")
         tip = self.get_eco_tip(category)
         self.tip_label.configure(text=tip)
 
-        # Store classification in user history 
         item_name = os.path.basename(self.image_path) 
         if description:
             item_name = f"{item_name} ({description})"
 
-        # Insert into history table
         c.execute("INSERT INTO history (username, category, item) VALUES (?, ?, ?)",
                   (self.current_user, category, item_name))
         conn.commit()
 
-        # Award eco points for uploading image
         new_points_total = self.add_points(self.current_user, 3)
         self.update_points_display()
 
-        # Show results in popup for immediate feedback
-        messagebox.showinfo("Result", f"Category: {category}\n\nTip: {tip}\n\n🌟 +3 Eco Points! Total: {new_points_total}")
+        messagebox.showinfo("Result", f"Category: {category}\n\nTip: {tip}\n\n +3 Eco Points! Total: {new_points_total}")
 
     def generate_fun_fact(self):
 
@@ -478,49 +446,40 @@ class SortifyApp:
         return tips.get(category, "Dispose responsibly and recycle if possible.")
 
     def submit_feedback(self):
-        # Collects and stores user feedback on classification accuracy
         
-        feedback_type = self.feedback_var.get()  # Get radio button selection
+        feedback_type = self.feedback_var.get()  
         feedback_msg = self.feedback_text.get("1.0","end").strip()  # Get text content
         
         if feedback_msg:
-            # Store feedback in database
             c.execute("INSERT INTO feedback (username, type, message) VALUES (?, ?, ?)",
                       (self.current_user, feedback_type, feedback_msg))
             conn.commit()
             
-            # Award eco points for providing feedback
             new_points_total = self.add_points(self.current_user, 1)
             self.update_points_display()
             
-            # Confirmation
             messagebox.showinfo("Feedback Submitted", f"Type: {feedback_type}\nMessage: {feedback_msg}\n\n🌟 +1 Eco Point! Total: {new_points_total}")
             self.feedback_text.delete("1.0","end")  # Clear text area
         else:
             messagebox.showwarning("Empty Feedback","Please write something before submitting.")
 
     def check_login(self):
-        #Validates credentials
         user = self.login_user.get().strip()
         pw = self.login_pass.get().strip()
 
-        #Checks for admin credentials   
         if user == "sortifyAdmin" and pw == "729099":
             self.current_user = user
             self.admin_window() 
             return
 
-        # Check credentials against users table
         c.execute("SELECT 1 FROM users WHERE username=? AND password=?", (user, pw))
-        if c.fetchone():  # If query returns a result, credentials are valid
+        if c.fetchone(): 
             self.current_user = user
             self.main_window()  # Route to main application
         else:
             messagebox.showerror("Login Failed","Invalid username or password")
 
     def register_user(self):
-        
-        # Creates new account 
         user = self.signup_user.get().strip()
         pw = self.signup_pass.get().strip()
 
@@ -529,12 +488,11 @@ class SortifyApp:
             return
 
         try:
-            # Inserting username and pw to the table
             c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (user, pw))
             conn.commit()
-            messagebox.showinfo("Success", "Account created successfully! You can now log in.")
-            self.login_page()  # Redirect to login
-            
+            messagebox.showinfo("Success", "Account created successfully!")
+            self.main_window()  # Route to main application
+
         except sqlite3.IntegrityError:
             # Handle duplicate username case
             messagebox.showerror("Error", "Username already exists. Please choose another.")
@@ -550,5 +508,5 @@ class SortifyApp:
 
 
 if __name__ == "__main__":
-    # Only run if this file is executed directly (not imported)
     SortifyApp()
+
