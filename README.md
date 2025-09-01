@@ -1,4 +1,4 @@
-# Sortify
+https://drive.google.com/file/d/1NDPfiEdGNLiKagLAvG8QPAbzZ4L5Xxdz/view?usp=sharing
 
 Sortify is a Python-based GUI application for classifying waste into predefined categories.  
 It is designed to encourage eco-friendly waste disposal practices and demonstrate basic image processing, GUI design, and database management.
