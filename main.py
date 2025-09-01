@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS feedback (
 )
 """)
 
+# Eco points table for gamification
+c.execute("""
+CREATE TABLE IF NOT EXISTS eco_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    points INTEGER DEFAULT 0,
+    FOREIGN KEY (username) REFERENCES users (username)
+)
+""")
+
 #save changes
 conn.commit()
 
@@ -172,6 +182,35 @@ class SortifyApp:
         for widget in self.root.winfo_children():
             widget.destroy()
 
+    # Gamification methods
+    def get_user_points(self, username):
+        """Get current eco points for a user"""
+        c.execute("SELECT points FROM eco_points WHERE username=?", (username,))
+        result = c.fetchone()
+        return result[0] if result else 0
+
+    def add_points(self, username, points):
+        """Add eco points to a user's account"""
+        c.execute("SELECT points FROM eco_points WHERE username=?", (username,))
+        result = c.fetchone()
+        
+        if result:
+            # User exists, update points
+            new_points = result[0] + points
+            c.execute("UPDATE eco_points SET points=? WHERE username=?", (new_points, username))
+        else:
+            # New user, create entry
+            c.execute("INSERT INTO eco_points (username, points) VALUES (?, ?)", (username, points))
+        
+        conn.commit()
+        return self.get_user_points(username)
+
+    def update_points_display(self):
+        """Update the points display in the UI"""
+        if hasattr(self, 'points_label'):
+            current_points = self.get_user_points(self.current_user)
+            self.points_label.configure(text=f"🌟 Eco Points: {current_points}")
+
     # ---- AUTHENTICATION PAGES --- 
 
     def login_page(self):
@@ -292,6 +331,16 @@ class SortifyApp:
         CTkButton(feedback_frame, text="Submit Feedback", fg_color="#0e9a46", width=150, corner_radius=20,
                   command=self.submit_feedback).pack(pady=5)
 
+        # Eco Points Display
+        points_frame = CTkFrame(rightPanel, fg_color="#2b5797", corner_radius=15)
+        points_frame.pack(padx=10, pady=10, fill="x")
+        
+        self.points_label = CTkLabel(points_frame, text="🌟 Eco Points: 0", font=("Arial",16,"bold"), text_color="white")
+        self.points_label.pack(pady=10)
+        
+        # Update points display on window load
+        self.update_points_display()
+
     # ADMIN DASHBOARD
     def admin_window(self):
         #this dashboard diplays all users and their feedback data
@@ -393,8 +442,12 @@ class SortifyApp:
                   (self.current_user, category, item_name))
         conn.commit()
 
+        # Award eco points for uploading image
+        new_points_total = self.add_points(self.current_user, 3)
+        self.update_points_display()
+
         # Show results in popup for immediate feedback
-        messagebox.showinfo("Result", f"Category: {category}\n\nTip: {tip}")
+        messagebox.showinfo("Result", f"Category: {category}\n\nTip: {tip}\n\n🌟 +3 Eco Points! Total: {new_points_total}")
 
     def generate_fun_fact(self):
 
@@ -436,8 +489,12 @@ class SortifyApp:
                       (self.current_user, feedback_type, feedback_msg))
             conn.commit()
             
+            # Award eco points for providing feedback
+            new_points_total = self.add_points(self.current_user, 1)
+            self.update_points_display()
+            
             # Confirmation
-            messagebox.showinfo("Feedback Submitted", f"Type: {feedback_type}\nMessage: {feedback_msg}")
+            messagebox.showinfo("Feedback Submitted", f"Type: {feedback_type}\nMessage: {feedback_msg}\n\n🌟 +1 Eco Point! Total: {new_points_total}")
             self.feedback_text.delete("1.0","end")  # Clear text area
         else:
             messagebox.showwarning("Empty Feedback","Please write something before submitting.")
