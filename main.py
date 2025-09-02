@@ -65,7 +65,7 @@ def classify_with_opencv(image_path, description=""):
         # Initialize probability scores
         recyclable_score = reusable_score = compostable_score = trash_score = 0
 
-        # --- Color & texture detection ---
+        # --- Color masks ---
         green_mask = cv2.inRange(hsv, np.array([30, 40, 40]), np.array([85, 255, 255]))
         green_ratio = cv2.countNonZero(green_mask) / (300 * 300)
 
@@ -75,74 +75,80 @@ def classify_with_opencv(image_path, description=""):
         blue_mask = cv2.inRange(hsv, np.array([90, 60, 60]), np.array([130, 255, 255]))
         blue_ratio = cv2.countNonZero(blue_mask) / (300 * 300)
 
+        brown_mask = cv2.inRange(hsv, np.array([5, 40, 40]), np.array([25, 200, 200]))
+        brown_ratio = cv2.countNonZero(brown_mask) / (300 * 300)
+
+        black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 40]))
+        black_ratio = cv2.countNonZero(black_mask) / (300 * 300)
+
+        grey_mask = cv2.inRange(hsv, np.array([0, 0, 40]), np.array([180, 40, 180]))
+        grey_ratio = cv2.countNonZero(grey_mask) / (300 * 300)
+
         _, thresh_white = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
         white_ratio = cv2.countNonZero(thresh_white) / (300 * 300)
 
         edges = cv2.Canny(gray, 100, 200)
         edge_ratio = cv2.countNonZero(edges) / (300 * 300)
 
-        brown_mask = cv2.inRange(hsv, np.array([5, 30, 30]), np.array([20, 200, 200]))
-        brown_ratio = cv2.countNonZero(brown_mask) / (300 * 300)
-
         texture_variance = np.std(gray)
-
-        # Trash indicators (black/grey/damaged detection)
-        black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 50]))
-        black_ratio = cv2.countNonZero(black_mask) / (300 * 300)
-
-        grey_mask = cv2.inRange(hsv, np.array([0, 0, 50]), np.array([180, 30, 150]))
-        grey_ratio = cv2.countNonZero(grey_mask) / (300 * 300)
-
         brightness_std = np.std(hsv[:, :, 2])
-        low_sat_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 50, 255]))
-        low_sat_ratio = cv2.countNonZero(low_sat_mask) / (300 * 300)
 
         # --- Trash detection ---
-        if black_ratio > 0.12 or grey_ratio > 0.18 or (brightness_std > 50 and low_sat_ratio > 0.5):
+        if black_ratio > 0.1 or grey_ratio > 0.18:
             trash_score += 50
-        elif black_ratio > 0.08 or grey_ratio > 0.12:
+        elif (black_ratio > 0.07 and (green_ratio + yellow_ratio + brown_ratio) < 0.08):
+            trash_score += 40
+        if brightness_std > 60 and (black_ratio + grey_ratio) > 0.15:
             trash_score += 25
 
         # --- Compostable detection ---
-        if green_ratio > 0.15 or yellow_ratio > 0.15 or brown_ratio > 0.12:
-            compostable_score += 30
-        if 25 < texture_variance < 55:
-            compostable_score += 15
+        if green_ratio > 0.12 or yellow_ratio > 0.12 or brown_ratio > 0.1:
+            compostable_score += 40
+        if 20 < texture_variance < 60:
+            compostable_score += 20
+        if compostable_score > trash_score:
+            trash_score = max(0, trash_score - 20)
 
         # --- Recyclable detection ---
-        if blue_ratio > 0.08:  # blue plastics
+        if blue_ratio > 0.08:  
+            recyclable_score += 35
+        if white_ratio > 0.15 and texture_variance < 55:  
             recyclable_score += 30
-        if white_ratio > 0.15 and texture_variance < 50:  # clean white surface (paper/containers)
-            recyclable_score += 25
-        if edge_ratio > 0.18 and texture_variance < 60:  # structured manufactured item
+        if edge_ratio > 0.18 and texture_variance < 65:  
             recyclable_score += 20
 
         # --- Reusable detection ---
-        if edge_ratio > 0.25 and texture_variance < 40 and black_ratio < 0.08:  
-            reusable_score += 30  # sturdy intact object
-        if white_ratio > 0.20 and texture_variance < 30:  
-            reusable_score += 20  # clean smooth container
-        if brown_ratio > 0.08 and texture_variance < 45:  
-            reusable_score += 15  # wooden/leather reusable items
+        if edge_ratio > 0.25 and texture_variance < 40 and black_ratio < 0.08:
+            reusable_score += 35
+        if white_ratio > 0.2 and texture_variance < 35:
+            reusable_score += 25
+        if brown_ratio > 0.08 and texture_variance < 45:
+            reusable_score += 15
 
-        # --- Description keywords ---
+        # --- Strong keyword detection ---
         desc = description.lower()
-        if any(word in desc for word in ["container", "tupperware", "box", "jar", "bottle"]):
-            reusable_score += 40  # strong boost for reusable items
-        if any(word in desc for word in ["plastic", "glass", "metal", "paper", "cardboard", "can"]):
-            recyclable_score += 35
-        if any(word in desc for word in ["food", "organic", "banana", "leaves", "compost"]):
-            compostable_score += 40
-        if any(word in desc for word in ["dirty", "broken", "damaged", "burnt", "contaminated"]):
-            trash_score += 50
 
-        # --- Safety base scores ---
+        compostable_keywords = ["moldy", "food", "organic", "banana", "apple", "leaves", "compost", "rotten", "vegetable", "fruit", "bread"]
+        recyclable_keywords = ["plastic", "glass", "metal", "paper", "cardboard", "can"]
+        reusable_keywords = ["container", "tupperware", "box", "jar", "bottle", "good condition", "clean"]
+        trash_keywords = ["dirty", "broken", "damaged", "burnt", "contaminated"]
+
+        if any(word in desc for word in compostable_keywords):
+            compostable_score += 100 
+        if any(word in desc for word in recyclable_keywords):
+            recyclable_score += 100
+        if any(word in desc for word in reusable_keywords):
+            reusable_score += 100
+        if any(word in desc for word in trash_keywords):
+            trash_score += 100
+
+        # Base safeguard
         recyclable_score += 5
         reusable_score += 5
         compostable_score += 5
         trash_score += 5
 
-        # --- Calculate percentages ---
+        # --- Normalize ---
         total = recyclable_score + reusable_score + compostable_score + trash_score
         recyclable_percent = int((recyclable_score / total) * 100)
         reusable_percent = int((reusable_score / total) * 100)
@@ -156,10 +162,7 @@ def classify_with_opencv(image_path, description=""):
             "Trash": trash_percent
         }
 
-        # Prefer "Reusable" over "Recyclable" when both are high
         most_likely = max(probabilities, key=probabilities.get)
-        if probabilities["Reusable"] >= 30 and probabilities["Recyclable"] >= 30:
-            most_likely = "Reusable"
 
         return probabilities, most_likely
 
@@ -302,6 +305,8 @@ class SortifyApp:
                   
         CTkButton(leftPanel, text="Generate Fun Fact!", fg_color="#0e9a46", width=200, corner_radius=25, 
                   command=self.generate_fun_fact).pack(pady=5)
+        
+        CTkLabel(leftPanel, text="Pro tip- Describe the objects to get better results!", font=("Arial",10,"italic")).pack(pady=5)
 
         # RIGHT PANEL
         rightPanel = CTkScrollableFrame(mainFrame)
