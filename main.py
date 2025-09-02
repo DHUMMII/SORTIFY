@@ -185,6 +185,7 @@ class SortifyApp:
 
         self.current_user = None  # Tracks logged-in user
         self.image_path = None    # Stores path to selected image
+        self.points_awarded_for_current_image = False  # Track if points were awarded for current image
 
         self.login_page()
         self.root.mainloop()
@@ -420,6 +421,9 @@ class SortifyApp:
         )
         
         if self.image_path:
+            # Reset points flag for new image
+            self.points_awarded_for_current_image = False
+            
             try:
                 img = Image.open(self.image_path)
                 ctk_img = CTkImage(light_image=img, dark_image=img, size=(260, 120)) #load and resize the image for preview
@@ -456,13 +460,21 @@ class SortifyApp:
                   (self.current_user, most_likely_category, item_name))
         conn.commit()
 
-        new_points_total = self.add_points(self.current_user, 3)
-        self.update_points_display()
+        # Only award points if this is the first classification for this image
+        points_message = ""
+        if not self.points_awarded_for_current_image:
+            new_points_total = self.add_points(self.current_user, 3)
+            self.update_points_display()
+            self.points_awarded_for_current_image = True
+            points_message = f"\n\n +3 Eco Points! Total: {new_points_total}"
+        else:
+            current_points = self.get_user_points(self.current_user)
+            points_message = f"\n\n(Points already awarded for this image. Total: {current_points})"
 
         # Create probability display string for messagebox
         prob_text = f"Recyclable: {probabilities['Recyclable']}%\nReusable: {probabilities['Reusable']}%\nCompostable: {probabilities['Compostable']}%\nTrash: {probabilities['Trash']}%"
         
-        messagebox.showinfo("Result", f"Analysis Complete!\n\n{prob_text}\n\nMost Likely: {most_likely_category}\n\nTip: {tip}\n\n +3 Eco Points! Total: {new_points_total}")
+        messagebox.showinfo("Result", f"Analysis Complete!\n\n{prob_text}\n\nMost Likely: {most_likely_category}\n\nTip: {tip}{points_message}")
 
     def generate_fun_fact(self):
 
@@ -549,6 +561,7 @@ class SortifyApp:
         # Reset application state
         self.current_user = None
         self.image_path = None
+        self.points_awarded_for_current_image = False
 
         # Return to login screen
         self.root.geometry("500x500")
