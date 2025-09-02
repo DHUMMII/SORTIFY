@@ -52,87 +52,223 @@ CREATE TABLE IF NOT EXISTS eco_points (
 
 conn.commit()
 
-# Classification logic 
+# Updated Classification logic with improved trash detection
 def classify_with_opencv(image_path, description=""):
     try:
         img = cv2.imread(image_path)
         if img is None:
-            return "Unclear"
+            return {"Recyclable": 25, "Reusable": 25, "Compostable": 25, "Trash": 25}, "Trash"
 
         img = cv2.resize(img, (300, 300))
         
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)  #
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)  
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        # Initialize probability scores
+        recyclable_score = 0
+        reusable_score = 0
+        compostable_score = 0  # Added compostable category
+        trash_score = 0
 
         # COLOR BASED CLASSIFICATION 
         
         # GREEN DETECTION: Typically organic waste, bottles, or compostable items
-        # HSV ranges: Hue 30-85 (green spectrum), Saturation 40-255, Value 40-255
         green_mask = cv2.inRange(hsv, np.array([30, 40, 40]), np.array([85, 255, 255]))
-        green_ratio = cv2.countNonZero(green_mask) / (300 * 300)  # Percentage of green pixels
+        green_ratio = cv2.countNonZero(green_mask) / (300 * 300)
 
         # YELLOW DETECTION: Often indicates organic waste or certain plastics
-        # HSV ranges: Hue 15-35 (yellow spectrum)
         yellow_mask = cv2.inRange(hsv, np.array([15, 60, 60]), np.array([35, 255, 255]))
         yellow_ratio = cv2.countNonZero(yellow_mask) / (300 * 300)
 
         # BLUE DETECTION: Common in recyclable plastic bottles and containers
-        # HSV ranges: Hue 90-130 (blue spectrum)
         blue_mask = cv2.inRange(hsv, np.array([90, 60, 60]), np.array([130, 255, 255]))
         blue_ratio = cv2.countNonZero(blue_mask) / (300 * 300)
 
         # WHITE DETECTION: Paper, cardboard, clean containers
-        # Uses grayscale thresholding - pixels above 200 intensity are considered white
         _, thresh_white = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
         white_ratio = cv2.countNonZero(thresh_white) / (300 * 300)
 
-        # EDGE DETECTION: High edge density often indicates manufactured items (recyclable)
-        # Canny edge detection with thresholds 100-200 for good edge sensitivity
+        # EDGE DETECTION: High edge density often indicates manufactured items
         edges = cv2.Canny(gray, 100, 200)
         edge_ratio = cv2.countNonZero(edges) / (300 * 300)
 
-        # BROWN/WOOD DETECTION: For detecting reusable items like wooden objects, leather goods
-        # HSV ranges: Hue 5-20 (brown/orange spectrum), moderate saturation and value
+        # BROWN/WOOD DETECTION: For detecting reusable items and organic matter
         brown_mask = cv2.inRange(hsv, np.array([5, 30, 30]), np.array([20, 200, 200]))
         brown_ratio = cv2.countNonZero(brown_mask) / (300 * 300)
 
-        # TEXTURE ANALYSIS: Low texture variance often indicates smooth, intact reusable items
-        # Calculate standard deviation of gray values - smooth objects have lower variance
+        # TEXTURE ANALYSIS: Smooth surfaces often indicate intact items
         texture_variance = np.std(gray)
 
-        if green_ratio > 0.12 or yellow_ratio > 0.12:
-            category = "Compostable"
-        elif brown_ratio > 0.10 and texture_variance < 45:  # Brown items with smooth texture = reusable
-            category = "Reusable"
-        elif edge_ratio > 0.25 and texture_variance < 40:  # High edges but smooth = intact reusable item
-            category = "Reusable"
-        elif blue_ratio > 0.08:  # Blue plastics/containers
-            category = "Recyclable"
-        elif white_ratio > 0.15:  # Paper/cardboard
-            category = "Recyclable"
-        elif edge_ratio > 0.25:  # High edge density = manufactured items
-            category = "Recyclable"
-        else:
-            category = "Trash"
+        # RED DETECTION: Often indicates warning labels or damaged items
+        red_mask1 = cv2.inRange(hsv, np.array([0, 60, 60]), np.array([10, 255, 255]))
+        red_mask2 = cv2.inRange(hsv, np.array([170, 60, 60]), np.array([180, 255, 255]))
+        red_mask = cv2.bitwise_or(red_mask1, red_mask2)
+        red_ratio = cv2.countNonZero(red_mask) / (300 * 300)
 
+        # ========== IMPROVED TRASH DETECTION LOGIC ==========
+        
+        # BLACK/DARK DETECTION: Dark colors often indicate burnt, dirty, or damaged items
+        black_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 50]))
+        black_ratio = cv2.countNonZero(black_mask) / (300 * 300)
+        
+        # GREY DETECTION: Grey colors often indicate ash, dirt, or deteriorated items
+        grey_mask = cv2.inRange(hsv, np.array([0, 0, 50]), np.array([180, 30, 150]))
+        grey_ratio = cv2.countNonZero(grey_mask) / (300 * 300)
+        
+        # COLOR DIVERSITY ANALYSIS: Mixed colors often indicate messy waste
+        # Calculate color histogram to detect color mixing
+        hist_h = cv2.calcHist([hsv], [0], None, [180], [0, 180])
+        hist_s = cv2.calcHist([hsv], [1], None, [256], [0, 256])
+        hist_v = cv2.calcHist([hsv], [2], None, [256], [0, 256])
+        
+        # Count significant peaks in histograms (indicates multiple distinct colors)
+        h_peaks = len([i for i in range(1, 179) if hist_h[i] > hist_h[i-1] and hist_h[i] > hist_h[i+1] and hist_h[i] > 500])
+        s_peaks = len([i for i in range(1, 255) if hist_s[i] > hist_s[i-1] and hist_s[i] > hist_s[i+1] and hist_s[i] > 500])
+        
+        color_diversity = (h_peaks + s_peaks) / 2  # Average peaks across hue and saturation
+        
+        # BRIGHTNESS INCONSISTENCY: Irregular lighting suggests damaged/dirty items
+        brightness_std = np.std(hsv[:,:,2])  # Standard deviation of brightness values
+        
+        # SATURATION ANALYSIS: Very low saturation often indicates faded/old items
+        low_sat_mask = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 50, 255]))
+        low_sat_ratio = cv2.countNonZero(low_sat_mask) / (300 * 300)
+        
+        # NOISE/GRAIN DETECTION: Noisy images often indicate damaged items
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        noise_level = np.var(laplacian)
 
-        #keywords which may be used in user's description
+        # SCORING SYSTEM BASED ON VISUAL FEATURES
 
+        # ========== STRICT TRASH SCORING ==========
+        
+        # High black content = likely burnt, very dirty, or damaged
+        if black_ratio > 0.15:  # More than 15% black pixels
+            trash_score += 40
+        elif black_ratio > 0.08:  # More than 8% black pixels
+            trash_score += 25
+            
+        # High grey content = likely ash, dirt, or deteriorated
+        if grey_ratio > 0.20:  # More than 20% grey pixels
+            trash_score += 35
+        elif grey_ratio > 0.12:  # More than 12% grey pixels
+            trash_score += 20
+            
+        # Color diversity indicates mixed waste/messy items
+        if color_diversity > 8:  # Many different colors mixed together
+            trash_score += 30
+        elif color_diversity > 5:
+            trash_score += 15
+            
+        # Very high texture variance = damaged/deteriorated surfaces
+        if texture_variance > 70:
+            trash_score += 35
+        elif texture_variance > 50:
+            trash_score += 20
+            
+        # Brightness inconsistency = irregular/damaged items
+        if brightness_std > 60:
+            trash_score += 25
+        elif brightness_std > 40:
+            trash_score += 15
+            
+        # Very low saturation = faded/old items
+        if low_sat_ratio > 0.60:  # More than 60% unsaturated
+            trash_score += 30
+        elif low_sat_ratio > 0.40:  # More than 40% unsaturated
+            trash_score += 15
+            
+        # High noise level = poor quality/damaged items
+        if noise_level > 800:
+            trash_score += 25
+        elif noise_level > 500:
+            trash_score += 15
+            
+        # Combination penalties (these are especially strong trash indicators)
+        if black_ratio > 0.10 and grey_ratio > 0.15:  # Lots of black AND grey
+            trash_score += 50
+            
+        if color_diversity > 6 and texture_variance > 60:  # Mixed colors AND rough texture
+            trash_score += 40
+            
+        if low_sat_ratio > 0.50 and brightness_std > 50:  # Faded AND inconsistent lighting
+            trash_score += 35
+
+        # Traditional trash indicators (keep existing logic but reduce weights)
+        if red_ratio > 0.05:  # Red often indicates warnings/damage
+            trash_score += 10
+        if edge_ratio < 0.10:  # Low edge density might indicate formless waste
+            trash_score += 10
+
+        # ========== COMPOSTABLE INDICATORS ==========
+        
+        # High green/yellow content often indicates organic matter
+        if green_ratio > 0.20 and yellow_ratio > 0.15:  # Lots of green AND yellow
+            compostable_score += 40
+        elif green_ratio > 0.15:  # Significant green content
+            compostable_score += 25
+        elif yellow_ratio > 0.20:  # Significant yellow content
+            compostable_score += 20
+            
+        # Brown content can indicate organic matter (leaves, food scraps, etc.)
+        if brown_ratio > 0.15 and texture_variance > 30:  # Brown with some texture variation
+            compostable_score += 30
+        elif brown_ratio > 0.10:
+            compostable_score += 15
+            
+        # Moderate texture variance might indicate organic textures
+        if 25 < texture_variance < 55:  # Not too smooth, not too rough
+            compostable_score += 15
+
+        # ========== RECYCLABLE/REUSABLE INDICATORS (with trash penalties) ==========
+        
+        # Reduce recyclable/reusable scores if trash indicators are strong
+        trash_penalty_factor = 1.0
+        if black_ratio > 0.12 or grey_ratio > 0.18 or color_diversity > 7:
+            trash_penalty_factor = 0.3  # Heavily reduce recyclable/reusable chances
+        elif black_ratio > 0.08 or grey_ratio > 0.12 or color_diversity > 5:
+            trash_penalty_factor = 0.6  # Moderately reduce recyclable/reusable chances
+
+        # Recyclable indicators (with trash penalties applied)
+        if blue_ratio > 0.08 and trash_penalty_factor > 0.5:  # Blue plastics (if not too trashy)
+            recyclable_score += int(25 * trash_penalty_factor)
+        if white_ratio > 0.15 and texture_variance < 50:  # Clean paper/cardboard
+            recyclable_score += int(20 * trash_penalty_factor)
+        if edge_ratio > 0.20 and texture_variance < 60:  # Manufactured items with clear edges
+            recyclable_score += int(15 * trash_penalty_factor)
+        if green_ratio > 0.05 and green_ratio < 0.15 and black_ratio < 0.08:  # Clean green containers
+            recyclable_score += int(20 * trash_penalty_factor)
+
+        # Reusable indicators
+        if brown_ratio > 0.08 and texture_variance < 45:  # Clean wood/leather items
+            reusable_score += int(25 * trash_penalty_factor)
+        if texture_variance < 35 and edge_ratio > 0.15 and black_ratio < 0.05:  # Smooth, intact objects
+            reusable_score += int(20 * trash_penalty_factor)
+        if edge_ratio > 0.25 and texture_variance < 40 and brightness_std < 30:  # Clear, well-lit objects
+            reusable_score += int(15 * trash_penalty_factor)
+        if white_ratio > 0.20 and texture_variance < 30 and low_sat_ratio < 0.30:  # Clean, vibrant items
+            reusable_score += int(10 * trash_penalty_factor)
+
+        # KEYWORD ANALYSIS FROM DESCRIPTION (strengthen trash keywords)
         keywords = {
             "Recyclable": [
                 "plastic", "bottle", "paper", "box", "aluminum", "metal", 
-                "cardboard", "glass", "can", "container"
-            ],
-            "Compostable": [
-                "food", "fruit", "vegetable", "peel", "scraps", "leftover", 
-                "rotten", "cotton", "moldy"
+                "cardboard", "glass", "can", "container", "clean", "empty"
             ],
             "Reusable": [
-                "jar", "bag", "clothes", "book", "toy", "furniture", "intact", 
-                "good condition", "working", "clean", "reuse", "donate"
+                "jar", "bag", "clothes", "book", "toy", "furniture", "intact", "cardboard"
+                "good condition", "working", "reuse", "donate", "functional"
+            ],
+            "Compostable": [
+                "food", "organic", "banana", "apple", "fruit", "vegetable", 
+                "leaves", "grass", "coffee grounds", "tea bags", "eggshells",
+                "biodegradable", "compost", "natural", "plant"
             ],
             "Trash": [
-                "crushed", "broken", "cracked", "torn", "burnt", "melted"
+                "broken", "cracked", "torn", "burnt", "melted", "dirty", 
+                "damaged", "rotten", "moldy", "waste", "garbage", "rubbish",
+                "spoiled", "contaminated", "stained", "smelly", "decomposed",
+                "rusty", "corroded", "shattered", "destroyed", "unusable"
             ]
         }
 
@@ -140,12 +276,45 @@ def classify_with_opencv(image_path, description=""):
         for category, word_list in keywords.items():
             for word in word_list:
                 if word in desc:
-                    category = category  
-                    return category
+                    if category == "Recyclable":
+                        recyclable_score += int(20 * trash_penalty_factor)
+                    elif category == "Reusable":
+                        reusable_score += int(20 * trash_penalty_factor)
+                    elif category == "Compostable":
+                        compostable_score += 30  # Strong boost for compostable keywords
+                    elif category == "Trash":
+                        trash_score += 40  # Strong boost for trash keywords
+
+        # Base scores to ensure total doesn't become 0
+        recyclable_score += 5
+        reusable_score += 5  
+        compostable_score += 5
+        trash_score += 5
+
+        # Calculate total and percentages
+        total_score = recyclable_score + reusable_score + compostable_score + trash_score
+        
+        recyclable_percent = int((recyclable_score / total_score) * 100)
+        reusable_percent = int((reusable_score / total_score) * 100) 
+        compostable_percent = int((compostable_score / total_score) * 100)
+        trash_percent = 100 - recyclable_percent - reusable_percent - compostable_percent
+
+        probabilities = {
+            "Recyclable": recyclable_percent,
+            "Reusable": reusable_percent, 
+            "Compostable": compostable_percent,
+            "Trash": trash_percent
+        }
+
+        # Determine most likely category
+        most_likely = max(probabilities, key=probabilities.get)
+
+        return probabilities, most_likely
 
     except Exception as e:
         print("OpenCV Error:", e)
-        return "Unclear"
+        # Return equal probabilities if error occurs
+        return {"Recyclable": 25, "Reusable": 25, "Compostable": 25, "Trash": 25}, "Trash"
 
 #  MAIN APPLICATION CLASS 
 
@@ -291,6 +460,18 @@ class SortifyApp:
         self.result_label = CTkLabel(rightPanel, text="Category: —", font=("Arial",20,"bold"))
         self.result_label.pack(pady=5)
 
+        # Probability display frame
+        self.prob_frame = CTkFrame(rightPanel, fg_color="#2d3748", corner_radius=15)
+        self.prob_frame.pack(padx=10, pady=10, fill="x")
+
+        CTkLabel(self.prob_frame, text="Probability Analysis", font=("Arial",14,"bold")).pack(pady=5)
+
+        self.prob_labels = {}
+        for category in ["Recyclable", "Reusable", "Compostable", "Trash"]:
+            label = CTkLabel(self.prob_frame, text=f"{category}: —%", font=("Arial",12))
+            label.pack(pady=2)
+            self.prob_labels[category] = label
+
         CTkLabel(rightPanel, text="Eco-friendly Tips", font=("Arial",14,"bold")).pack(pady=15)
 
         self.tip_label = CTkLabel(rightPanel, text="")
@@ -398,10 +579,16 @@ class SortifyApp:
 
         description = self.desc_box.get("1.0","end").strip()
         
-        category = classify_with_opencv(self.image_path, description)
+        probabilities, most_likely_category = classify_with_opencv(self.image_path, description)
 
-        self.result_label.configure(text=f"Category: {category}")
-        tip = self.get_eco_tip(category)
+        # Update result display
+        self.result_label.configure(text=f"Most Likely: {most_likely_category}")
+        
+        # Update probability labels
+        for category, percentage in probabilities.items():
+            self.prob_labels[category].configure(text=f"{category}: {percentage}%")
+
+        tip = self.get_eco_tip(most_likely_category)
         self.tip_label.configure(text=tip)
 
         item_name = os.path.basename(self.image_path) 
@@ -409,13 +596,16 @@ class SortifyApp:
             item_name = f"{item_name} ({description})"
 
         c.execute("INSERT INTO history (username, category, item) VALUES (?, ?, ?)",
-                  (self.current_user, category, item_name))
+                  (self.current_user, most_likely_category, item_name))
         conn.commit()
 
         new_points_total = self.add_points(self.current_user, 3)
         self.update_points_display()
 
-        messagebox.showinfo("Result", f"Category: {category}\n\nTip: {tip}\n\n +3 Eco Points! Total: {new_points_total}")
+        # Create probability display string for messagebox
+        prob_text = f"Recyclable: {probabilities['Recyclable']}%\nReusable: {probabilities['Reusable']}%\nCompostable: {probabilities['Compostable']}%\nTrash: {probabilities['Trash']}%"
+        
+        messagebox.showinfo("Result", f"Analysis Complete!\n\n{prob_text}\n\nMost Likely: {most_likely_category}\n\nTip: {tip}\n\n +3 Eco Points! Total: {new_points_total}")
 
     def generate_fun_fact(self):
 
@@ -439,8 +629,8 @@ class SortifyApp:
 
         tips = {
             "Recyclable": "Rinse bottles/containers and recycle in the correct bin.",
-            "Compostable": "Compost organic waste to reduce landfill.",
             "Reusable": "Clean and reuse this item, or donate it to extend its life cycle.",
+            "Compostable": "Compost this organic waste to reduce landfill and create nutrient-rich soil.",
             "Trash": "Dispose in general waste, avoid mixing with recyclables."
         }
         return tips.get(category, "Dispose responsibly and recycle if possible.")
@@ -491,6 +681,7 @@ class SortifyApp:
             c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (user, pw))
             conn.commit()
             messagebox.showinfo("Success", "Account created successfully!")
+            self.current_user = user  # Set current user after successful registration
             self.main_window()  # Route to main application
 
         except sqlite3.IntegrityError:
@@ -507,6 +698,6 @@ class SortifyApp:
         self.login_page()
 
 
+
 if __name__ == "__main__":
     SortifyApp()
-
